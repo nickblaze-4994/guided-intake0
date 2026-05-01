@@ -1,12 +1,14 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/start";
 
 export const classifyTicket = createServerFn({ method: "POST" })
-  .inputValidator((input: { systemPrompt: string; userMessage: string }) => input)
+  .validator((data: { systemPrompt: string; userMessage: string }) => data)
   .handler(async ({ data }) => {
     const apiKey = process.env.LOVABLE_API_KEY;
+    
     if (!apiKey) {
       return { ok: false as const, error: "LOVABLE_API_KEY not configured" };
     }
+    
     try {
       const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -23,17 +25,23 @@ export const classifyTicket = createServerFn({ method: "POST" })
           response_format: { type: "json_object" },
         }),
       });
+
       if (!res.ok) {
         const text = await res.text();
         if (res.status === 429) return { ok: false as const, error: "Rate limited. Try again shortly." };
         if (res.status === 402) return { ok: false as const, error: "AI credits exhausted." };
         return { ok: false as const, error: `Gateway ${res.status}: ${text.slice(0, 200)}` };
       }
+
       const json = await res.json();
       const content: string = json?.choices?.[0]?.message?.content ?? "";
+      
+      // Clean markdown formatting if the LLM includes it
       const cleaned = content.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(cleaned);
+      
       return { ok: true as const, parsed };
+      
     } catch (e) {
       return { ok: false as const, error: e instanceof Error ? e.message : "Unknown error" };
     }
