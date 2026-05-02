@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { classifyTicket } from "@/server/intake.functions";
 
 export const Route = createFileRoute("/")({
   component: IntakeApp,
@@ -167,6 +166,255 @@ Return ONLY a JSON object, no preamble, no markdown, no code fences. Schema:
 }`;
 
 /* ============================================================
+   MOCK AI RESULTS
+   Replaces the live model call so the prototype runs offline and
+   ships cleanly to Vercel without crossing the client/server line.
+   Distribution: 6 auto_route, 5 needs_review, 2 needs_input.
+   Two needs_review are White Glove → VIP Desk (Boutique tier).
+   ============================================================ */
+
+const MOCK_AI_RESULTS: Record<string, any> = {
+  uac: {
+    summary: "Enforce UAC FAILED · SOU-WHS-022",
+    category: "Security Policy", sub_category: "UAC Enforcement",
+    priority: "P3-Medium", board: "Managed Service Alerts",
+    company: "Company 005", site: "Site 032", device: "SOU-WHS-022", contact_email: null,
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 1, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "high" },
+    field_reasoning: {
+      summary: "parsed from alert payload", category: "UAC → Security Policy", sub_category: null,
+      priority: "routine policy alert → P3", board: "Automate alerts → MSA",
+      company: "parsed: Company 005", site: "parsed: Site 032 from path", device: "parsed: SOU-WHS-022", contact_email: null,
+    },
+    routing_decision: "auto_route",
+    routing_reason: "high confidence, routine alert",
+  },
+  usb: {
+    summary: "Enable USB Wall FAILED · SUR-9C-01",
+    category: "Security Policy", sub_category: "USB Wall",
+    priority: "P3-Medium", board: "Managed Service Alerts",
+    company: "Company 005", site: "Site 048", device: "SUR-9C-01", contact_email: null,
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [],
+    duplicate_check: {
+      is_likely_duplicate: true,
+      matched_ticket_ids: ["T-100033", "T-100025", "T-100057", "T-100094", "T-100096", "T-100102"],
+      pattern_count: 6,
+      recommendation: "link to pattern",
+    },
+    field_confidence: { summary: "high", category: "high", priority: "medium" },
+    field_reasoning: {
+      summary: "parsed from alert payload", category: "USB → Security Policy", sub_category: null,
+      priority: "duplicate pattern → escalate to human", board: "Automate alerts → MSA",
+      company: "parsed: Company 005", site: "parsed: Site 048 from path", device: "parsed: SUR-9C-01", contact_email: null,
+    },
+    routing_decision: "needs_review",
+    routing_reason: "duplicate of 6 recent tickets",
+  },
+  backup: {
+    summary: "Veeam Backup Job FAILED · SOU-DC-01 · 72hrs since last success",
+    category: "Backup", sub_category: "Veeam",
+    priority: "P2-High", board: "Backups",
+    company: "Company 005", site: "Site 014", device: "SOU-DC-01", contact_email: null,
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "high" },
+    field_reasoning: {
+      summary: "parsed alert + retention details", category: "Veeam → Backup", sub_category: null,
+      priority: "72hr retention breach → P2", board: "Backup alerts → Backups board",
+      company: "parsed: Company 005", site: "parsed: Site 014", device: "profile: Site 014 file server", contact_email: null,
+    },
+    routing_decision: "needs_review",
+    routing_reason: "P2 urgency, human approval",
+  },
+  vague: {
+    summary: "Vague request from ops alias — needs context",
+    category: "Incident", sub_category: null,
+    priority: "P3-Medium", board: "Service Desk",
+    company: "Company 005", site: null, device: null, contact_email: "ops@company-005.com",
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [
+      "Which system or device isn't working?",
+      "Who's affected and which site are they at?",
+    ],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "low", category: "low", priority: "medium" },
+    field_reasoning: {
+      summary: "no specifics in body", category: "no signal — fallback Incident", sub_category: null,
+      priority: "default until clarified", board: "inbound email → Service Desk",
+      company: "matched email domain", site: null, device: null, contact_email: "alias on file",
+    },
+    routing_decision: "needs_input",
+    routing_reason: "input too vague to classify",
+  },
+  diskspace: {
+    summary: "Server Free Space < 5 GB · SOU-FS-01 · D: 3.2 GB",
+    category: "Server", sub_category: "Disk Space",
+    priority: "P3-Medium", board: "Managed Service Alerts",
+    company: "Company 005", site: "Site 027", device: "SOU-FS-01", contact_email: null,
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "high" },
+    field_reasoning: {
+      summary: "parsed alert + free-space details", category: "disk space → Server", sub_category: null,
+      priority: "above critical threshold → P3", board: "Automate alerts → MSA",
+      company: "parsed: Company 005", site: "parsed: Site 027", device: "profile: Site 027 file server", contact_email: null,
+    },
+    routing_decision: "auto_route",
+    routing_reason: "high confidence, routine alert",
+  },
+  password: {
+    summary: "Email lockout after password change — Mark Chen",
+    category: "Account/Access", sub_category: "Password Reset",
+    priority: "P3-Medium", board: "Service Desk",
+    company: "Company 005", site: "Site 035", device: "MC-LT-042", contact_email: "m.chen@company-005.com",
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "high" },
+    field_reasoning: {
+      summary: "Mark says locked out post-change", category: "password reset → Account/Access", sub_category: null,
+      priority: "single user access → P3", board: "inbound email → Service Desk",
+      company: "matched email domain", site: "profile: Mark at Site 035", device: "profile: Mark's laptop", contact_email: "from email header",
+    },
+    routing_decision: "auto_route",
+    routing_reason: "high confidence, profile-enriched",
+  },
+  printer: {
+    summary: "Reception printer offline — Site 027",
+    category: "Hardware", sub_category: "Printer",
+    priority: "P3-Medium", board: "Service Desk",
+    company: "Company 005", site: "Site 027", device: "RP-027-01", contact_email: "reception@company-005.com",
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "high" },
+    field_reasoning: {
+      summary: "reception printer down, multi-user impact", category: "printer offline → Hardware", sub_category: null,
+      priority: "shared device, no workaround → P3", board: "inbound email → Service Desk",
+      company: "matched email domain", site: "stated in body: Site 027", device: "profile: HP LaserJet M428fdn", contact_email: "from email header",
+    },
+    routing_decision: "auto_route",
+    routing_reason: "high confidence, profile-enriched",
+  },
+  outlook: {
+    summary: "Outlook crashing every few minutes — Jenna Morris",
+    category: "Application", sub_category: "Outlook",
+    priority: "P2-High", board: "Service Desk",
+    company: "Company 005", site: "Site 027", device: "JM-LT-019", contact_email: "jenna.morris@company-005.com",
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "high" },
+    field_reasoning: {
+      summary: "Jenna reports repeated crashes despite restart", category: "Outlook → Application", sub_category: null,
+      priority: "urgent + close-week impact → P2", board: "inbound email → Service Desk",
+      company: "matched email domain", site: "profile: Jenna at Site 027", device: "profile: Jenna's laptop", contact_email: "from email header",
+    },
+    routing_decision: "needs_review",
+    routing_reason: "P2 urgency, human approval",
+  },
+  reboot: {
+    summary: "Pending Reboot > 7 days · SUR-LT-08 · 12 days",
+    category: "Security Policy", sub_category: "Patch Management",
+    priority: "P4-Low", board: "Recurring (Proactive)",
+    company: "Company 005", site: "Site 035", device: "SUR-LT-08", contact_email: null,
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "high" },
+    field_reasoning: {
+      summary: "parsed alert + last-reboot details", category: "patch reboot → Security Policy", sub_category: null,
+      priority: "non-urgent maintenance → P4", board: "proactive recurring → Recurring (Proactive)",
+      company: "parsed: Company 005", site: "parsed: Site 035", device: "parsed: SUR-LT-08", contact_email: null,
+    },
+    routing_decision: "auto_route",
+    routing_reason: "high confidence, routine alert",
+  },
+  mfa: {
+    summary: "MFA reset — Lisa Park got new phone",
+    category: "Account/Access", sub_category: "MFA Reset",
+    priority: "P3-Medium", board: "Service Desk",
+    company: "Company 005", site: "Site 027", device: "LP-LT-038", contact_email: "lisa.park@company-005.com",
+    contract_tier: "Managed IT Premium",
+    clarifying_questions: [
+      "Do you still have access to your old phone, or has it been wiped?",
+      "Can we verify your identity via a callback to a number on file?",
+    ],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "medium" },
+    field_reasoning: {
+      summary: "Lisa's authenticator on old phone", category: "MFA → Account/Access", sub_category: null,
+      priority: "single user, urgent same-day → P3", board: "inbound email → Service Desk",
+      company: "matched email domain", site: "profile: Lisa at Site 027", device: "profile: Lisa's laptop", contact_email: "from email header",
+    },
+    routing_decision: "needs_input",
+    routing_reason: "identity verification required",
+  },
+  "vip-laptop": {
+    summary: "VIP laptop performance issue — pre-court urgency",
+    category: "Performance", sub_category: "Laptop",
+    priority: "P2-High", board: "VIP Desk",
+    company: "Company 012", site: "Main Office", device: "RA-LT-001", contact_email: "r.albright@company-012.com",
+    contract_tier: "White Glove",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "high" },
+    field_reasoning: {
+      summary: "VIP partner, generic phrasing per confidentiality rule", category: "slow laptop → Performance", sub_category: null,
+      priority: "VIP + same-day deadline → P2", board: "White Glove → VIP Desk",
+      company: "matched email domain", site: "profile: Main Office", device: "profile: Richard's laptop", contact_email: "from email header",
+    },
+    routing_decision: "needs_review",
+    routing_reason: "White Glove tier, VIP review",
+  },
+  "vip-mfa-travel": {
+    summary: "Pre-stage MFA, VPN, email for international travel",
+    category: "Request", sub_category: "Travel Access",
+    priority: "P3-Medium", board: "VIP Desk",
+    company: "Company 012", site: "Main Office", device: "SD-LT-002", contact_email: "s.devereaux@company-012.com",
+    contract_tier: "White Glove",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "medium" },
+    field_reasoning: {
+      summary: "VIP partner, travel access pre-stage", category: "scheduled access change → Request", sub_category: null,
+      priority: "scheduled, no immediate impact → P3", board: "White Glove → VIP Desk",
+      company: "matched email domain", site: "profile: Main Office", device: "profile: Sarah's laptop", contact_email: "from email header",
+    },
+    routing_decision: "needs_review",
+    routing_reason: "White Glove tier, VIP review",
+  },
+  "vip-confidential": {
+    summary: "Secure file share request — partners-only access",
+    category: "Request", sub_category: "Secure File Share",
+    priority: "P3-Medium", board: "VIP Desk",
+    company: "Company 012", site: "Main Office", device: null, contact_email: "practice.manager@company-012.com",
+    contract_tier: "White Glove",
+    clarifying_questions: [],
+    duplicate_check: { is_likely_duplicate: false, matched_ticket_ids: [], pattern_count: 0, recommendation: "process as new" },
+    field_confidence: { summary: "high", category: "high", priority: "medium" },
+    field_reasoning: {
+      summary: "generic per confidentiality rule, no matter detail", category: "encrypted share setup → Request", sub_category: null,
+      priority: "scheduled setup, partners-only → P3", board: "White Glove → VIP Desk",
+      company: "matched email domain", site: "profile: Main Office", device: null, contact_email: "from email header",
+    },
+    routing_decision: "needs_review",
+    routing_reason: "White Glove tier, VIP review",
+  },
+};
+
+const fetchMockResult = (key: string): Promise<any> =>
+  new Promise((resolve) => {
+    const delay = 80 + Math.floor(Math.random() * 120);
+    setTimeout(() => resolve(MOCK_AI_RESULTS[key]), delay);
+  });
+
+/* ============================================================
    UI HELPERS
    ============================================================ */
 
@@ -269,16 +517,9 @@ function IntakeApp() {
   const active = items.find((i) => i.key === activeKey);
 
   const processItem = async (item: any) => {
-    const userMessage =
-      item.source === "email"
-        ? `Intake source: Inbound email\nFrom: ${item.sourceMeta}\n\n${item.raw}`
-        : `Intake source: ${item.sourceMeta}\n\nRaw payload:\n${item.raw}`;
     try {
-      const result = await classifyTicket({
-        data: { systemPrompt: SYSTEM_PROMPT, userMessage },
-      });
-      if (!result.ok) throw new Error(result.error);
-      const parsed = result.parsed;
+      const parsed = await fetchMockResult(item.key);
+      if (!parsed) throw new Error("no mock result for key");
       const bucket = parsed.routing_decision === "auto_route" ? "routed" : "attention";
       const tech = pickTech(parsed.board, item.idx);
       const newId = `T-${100247 + item.idx}`;
